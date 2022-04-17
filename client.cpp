@@ -1,4 +1,4 @@
-/* we have:
+/* 
 -my private key
 -my public key
 -authority public key
@@ -10,7 +10,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <iostream> 
-#include <stdio.h> // for fopen(), etc.
+#include <stdio.h>  // for fopen(), etc.
 #include <limits.h> // for INT_MAX
 #include <string.h> // for memset()
 #include <openssl/evp.h>
@@ -49,10 +49,10 @@ void printcommands()
 {
 	cout<<"--------------------------------------------------"<<endl;
 	cout<<"Available Features:"<<endl;
-	cout<<"!quit: exit program"<<endl;
-	cout<<"!help: print this list"<<endl;
-	cout<<"!list: request fresh available userlist"<<endl;
-	cout<<"!request <username>: request to chat with username"<<endl;
+	cout<<"--ex: exit program"<<endl;
+	cout<<"--h: print commands list"<<endl;
+	cout<<"--l: request online users"<<endl;
+	cout<<"--r <username>: request to chat with user"<<endl;
 	
 }
 
@@ -215,7 +215,7 @@ void *recv_handler(void* arguments){
 	if(!message){cerr<<"recv handler: message Malloc Error";exit(1);}
 	unsigned char* aad = (unsigned char*)malloc(MAX_SIZE);
 	if(!aad){cerr<<"recv handler: aad Malloc Error";exit(1);}
-	short opcode;
+	short cmdcode;
 	int message_size;
 	int ret;
 	unsigned int aadlen;
@@ -236,12 +236,12 @@ void *recv_handler(void* arguments){
 				//////NOI
 				memset(message, 0, message_size);
 				////////////
-				ret= auth_decrypt(buffer, message_size, server_sessionkey,opcode, aad, aadlen, message);
+				ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
 	
 				if(ret>=0){
 					increment_counter(*srv_recv_counter);
 					
-					switch(opcode){
+					switch(cmdcode){
 						
 						case 1:
 						{
@@ -254,7 +254,7 @@ void *recv_handler(void* arguments){
 								memcpy(peer_username,message,ret);
 								memcpy(nonce,aad+sizeof(unsigned int),NONCE_SIZE);
 								cout<<"Request to talk from: "<<peer_username<<endl;
-								cout<<"Type !accept or !refuse."<<endl;
+								cout<<"Type --y to accept or --n to refuse."<<endl;
 							}
 						}break;
 						case 3:
@@ -267,10 +267,10 @@ void *recv_handler(void* arguments){
 									if(ret>=0){
 										memcpy(buffer,(unsigned char*)srv_send_counter,sizeof(unsigned int));
 										memcpy(buffer+sizeof(unsigned int),aad,aadlen);
-										ret=auth_encrypt(6, buffer, aadlen+sizeof(unsigned int),(unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, aad);
+										ret=encryptor(6, buffer, aadlen+sizeof(unsigned int),(unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, aad);
 										cout <<"encryption: "<<ret <<endl;
 										if(ret>=0){
-											send_message(socket, ret, aad);
+											send_msg(socket, ret, aad);
 											increment_counter(*srv_send_counter);
 											*waiting=false;
 											*chatting=true;
@@ -296,7 +296,7 @@ void *recv_handler(void* arguments){
 								if(cntr==*clt_recv_counter){
 									unsigned int msgsize;
 									memset(message, 0, message_size);  
-									ret= auth_decrypt(aad+sizeof(unsigned int), aadlen-sizeof(unsigned int), client_sessionkey, opcode, buffer, msgsize, message,false);
+									ret= decryptor(aad+sizeof(unsigned int), aadlen-sizeof(unsigned int), client_sessionkey, cmdcode, buffer, msgsize, message,false);
 							
 									if (ret>0&&ret<MSG_MAX) {
 										increment_counter(*clt_recv_counter);	
@@ -389,7 +389,7 @@ int main(int argc, char *argv[]){
 	memcpy(buffer+NONCE_SIZE,username,strlen(username));
 	
 	unsigned int signed_size=digsign_sign(user_key, buffer, NONCE_SIZE+strlen(username),message);
-	send_message(sockfd, signed_size, message);
+	send_msg(sockfd, signed_size, message);
 
 
 	//Verify server certificate
@@ -444,7 +444,7 @@ int main(int argc, char *argv[]){
 	memcpy(message+message_size, buffered_ECDHpubkey, keysize);	
 	message_size+=keysize;
 	signed_size=digsign_sign(user_key, message, message_size,buffer);
-	send_message(sockfd, signed_size, buffer);
+	send_msg(sockfd, signed_size, buffer);
 	free(servernonce);
 
 	size_t slen;
@@ -469,17 +469,16 @@ int main(int argc, char *argv[]){
 	free(shared_secret);
 	
 	unsigned int srv_rcv_counter=0, srv_counter=0,clt_rcv_counter=0, clt_counter=0;
-	short opcode;
+	short cmdcode;
 	unsigned int aadlen;
 	unsigned int msglen;
 	message_size=receive_message(sockfd,buffer);
 	unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 	if(received_counter==srv_rcv_counter){
-		ret= auth_decrypt(buffer, message_size, server_sessionkey,opcode, aad, aadlen, message);
+		ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
 		increment_counter(srv_rcv_counter);
 		if (ret>=0) print_users_list(message,ret);
 	}
-/////////
 	
 	string command;
 	bool done=false;
@@ -516,10 +515,10 @@ int main(int argc, char *argv[]){
 		getline(cin, command);
 		pthread_mutex_lock(&mutex);
 		if (!waiting&&!chatting){
-			//if(!cin){cerr<<"cin error\n"; exit(1);}
+			if(!cin){cerr<<"cin error\n"; exit(1);}
 			if(pending){			
-				if(command.compare("!accept")==0){
-					opcode=3;
+				if(command.compare("--y")==0){
+					cmdcode=3;
 	 				chatting=true;
 					//create nonce
 					unsigned char* mynonce2=(unsigned char*)malloc(NONCE_SIZE);
@@ -548,17 +547,17 @@ int main(int argc, char *argv[]){
 					message_size=digsign_sign(user_key, buffer, NONCE_SIZE+NONCE_SIZE+keysize , message);
 					memcpy(aad, (unsigned char*) &srv_counter,  sizeof(unsigned int));
 					memcpy(aad+sizeof(unsigned int), message, message_size);
-					ret=auth_encrypt(3, aad, message_size+sizeof(unsigned int),  (unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, buffer);
-					cout << "result of accept encrypt: " << ret << endl;
-					send_message(sockfd,ret,buffer);
+					ret=encryptor(3, aad, message_size+sizeof(unsigned int),  (unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, buffer);
+					//cout << "result of accept encrypt: " << ret << endl;
+					send_msg(sockfd,ret,buffer);
 					increment_counter(srv_counter);
 					
 					message_size=receive_message(sockfd,buffer);	
 					if(message_size>0){
 						unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 						if(received_counter==srv_rcv_counter){
-							ret= auth_decrypt(buffer, message_size, server_sessionkey,opcode, aad, aadlen, message);
-							if(ret>= 0 && opcode==6){
+							ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
+							if(ret>= 0 && cmdcode==6){
 								increment_counter(srv_rcv_counter);
 								unsigned int pubkey_size=aadlen-sizeof(unsigned int);
 								BIO* pkbio= BIO_new(BIO_s_mem());
@@ -569,16 +568,16 @@ int main(int argc, char *argv[]){
 							}
 						}
 					}
-					//aspetta altro messaggio 6 con ecdhpubkey
-					cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
+					
+					//cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
 					message_size=receive_message(sockfd,buffer);
-					cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
+					//cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
 					if(message_size>0){
 						unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 						if(received_counter==srv_rcv_counter){
-							ret= auth_decrypt(buffer, message_size, server_sessionkey,opcode, aad, aadlen, message);
-							cout << " decrypt 2 msg : " << ret << buffer << endl;
-							if(ret>=0&&opcode==6){
+							ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
+							//cout << " decrypt 2 msg : " << ret << buffer << endl;
+							if(ret>=0&&cmdcode==6){
 								increment_counter(srv_rcv_counter);							
 								unsigned int s_size=*(unsigned int*)(aad+sizeof(unsigned int));			 
 								s_size+=(2*sizeof(unsigned int));
@@ -629,10 +628,10 @@ int main(int argc, char *argv[]){
 					
 					
 				}
-				else if(command.compare("!refuse")==0){
-					opcode=4;
-					ret=auth_encrypt(opcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)peer_username, strlen(peer_username)+1 , server_sessionkey, buffer);
-					send_message(sockfd,ret,buffer);
+				else if(command.compare("--n")==0){
+					cmdcode=4;
+					ret=encryptor(cmdcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)peer_username, strlen(peer_username)+1 , server_sessionkey, buffer);
+					send_msg(sockfd,ret,buffer);
 					increment_counter(srv_counter);
 					pthread_mutex_lock(&dhmutex);
 					pending=false;
@@ -640,36 +639,35 @@ int main(int argc, char *argv[]){
 					pthread_mutex_unlock(&dhmutex);
 					printcommands();
 				}else{
-					cout<<"Request to talk from: "<<peer_username<<endl;
-					cout<<"Type !accept or !refuse."<<endl;
+					cout<<"Chat request from: "<<peer_username<<endl;
+					cout<<"Type --y to accept or --n to refuse. *"<<endl;
 				}		
 			}
-			else if(command.compare("!quit")==0){			
-				opcode=0;				
-				
-				ret=auth_encrypt(opcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)username, strlen(username)+1 , server_sessionkey, buffer);
-				send_message(sockfd,ret,buffer);
+			else if(command.compare("--ex")==0){			
+				cmdcode=0;				
+				ret=encryptor(cmdcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)username, strlen(username)+1 , server_sessionkey, buffer);
+				send_msg(sockfd,ret,buffer);
 				increment_counter(srv_counter);
 				
 				done=true;
 			}
-			else if (command.compare("!help")==0){
+			else if (command.compare("--h")==0){
 				printcommands();
 			}				
-			else if (command.compare("!list")==0)
-			{	opcode=1;
-				
-				ret=auth_encrypt(opcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)username, strlen(username)+1 , server_sessionkey, buffer);
-				send_message(sockfd,ret,buffer);
+			else if (command.compare("--l")==0)
+			{	
+				cmdcode=1;
+				ret=encryptor(cmdcode,(unsigned char*) &srv_counter, sizeof(unsigned int), (unsigned char*)username, strlen(username)+1 , server_sessionkey, buffer);
+				send_msg(sockfd,ret,buffer);
 				increment_counter(srv_counter);
 
 			}
-			else if(command.compare(0,9,"!request ")==0){
-				string peer=command.substr(9,command.length());			
+			else if(command.compare(0,4,"--r ")==0){
+				string peer=command.substr(4,command.length());			
 				if(peer.length()>=USERNAME_SIZE)
 					cerr<<"Invalid username."<<endl;
 				else{
-					opcode=2;
+					cmdcode=2;
 					//send  RTT
 					waiting=true;
 					unsigned char* peer_name=(unsigned char*) malloc(peer.length());
@@ -681,14 +679,14 @@ int main(int argc, char *argv[]){
 					if(ret!=1){cerr<<"RAND_bytes Error";exit(1);}
 					memcpy(aad,(unsigned char*) &srv_counter, sizeof(unsigned int));
 					memcpy(aad+sizeof(unsigned int),nonce,NONCE_SIZE);
-					ret=auth_encrypt(opcode,aad, sizeof(unsigned int)+NONCE_SIZE, peer_name, peer.length(), server_sessionkey, buffer);  
-					send_message(sockfd,ret,buffer);
+					ret=encryptor(cmdcode,aad, sizeof(unsigned int)+NONCE_SIZE, peer_name, peer.length(), server_sessionkey, buffer);  
+					send_msg(sockfd,ret,buffer);
 					increment_counter(srv_counter);
 					cout<<"sent RTT to: "<<peer<<endl;		
 				}
 			}
 			else{	
-			//cout<<"Wrong command."<<endl;
+			 cout<<"Wrong command."<<endl;
 			}
 		}
 		
@@ -698,20 +696,20 @@ int main(int argc, char *argv[]){
 			if (command.length()>MSG_MAX) 
 				cerr<<"message too long."<<endl;
 			else if (command.length()>0){	
-				opcode=5;			
-				if(command.compare("!quit")==0){
-					opcode=8;
+				cmdcode=5;			
+				if(command.compare("--ex")==0){
+					cmdcode=8;
 					chatting=false;
 					printcommands();
 					
 				}
 				command.copy((char*)aad,command.length());
 				aad[command.length()]='\0';
-				message_size=auth_encrypt(5,(unsigned char*) &clt_counter,sizeof(unsigned int),aad,command.length(),client_sessionkey,message,false);
+				message_size=encryptor(5,(unsigned char*) &clt_counter,sizeof(unsigned int),aad,command.length(),client_sessionkey,message,false);
 				memcpy(aad,(unsigned char*) &srv_counter,sizeof(unsigned int));
 				memcpy(aad+sizeof(unsigned int),message,message_size);
-				ret=auth_encrypt(opcode,aad,message_size+sizeof(unsigned int),(unsigned char*)peer_username, strlen(peer_username)+1 ,server_sessionkey,buffer);
-				send_message(sockfd,ret,buffer);					
+				ret=encryptor(cmdcode,aad,message_size+sizeof(unsigned int),(unsigned char*)peer_username, strlen(peer_username)+1 ,server_sessionkey,buffer);
+				send_msg(sockfd,ret,buffer);					
 				increment_counter(srv_counter);
 				increment_counter(clt_counter);
 

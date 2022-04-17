@@ -10,7 +10,7 @@
 #include <string.h> 
 
 #define USERNAME_SIZE 20
-#define MAX_SIZE 20000
+#define MAX_SIZE 15000
 #define MSG_MAX 10000
 #define NONCE_SIZE 4
 #define MAX_CLIENTS 20
@@ -38,7 +38,7 @@ void increment_counter(unsigned int &counter){
 		counter++;
 }
 
-void send_message(int socket, unsigned int msg_size, unsigned char* message){
+void send_msg(int socket, unsigned int msg_size, unsigned char* message){
 	int ret;
 	if(msg_size>MAX_SIZE){cerr<<"send:message too big\n"; return;}
 	uint32_t size=htonl(msg_size);
@@ -192,17 +192,18 @@ unsigned int dh_generate_session_key(unsigned char *shared_secret,unsigned int s
 
 
 //Authenticated Encryption/Decryption
-unsigned int auth_encrypt(short opcode, unsigned char *aad, unsigned int aad_len, unsigned char *input_buffer, unsigned int input_len, unsigned char* shared_key, unsigned char *output_buffer, bool op=true){
+unsigned int encryptor(short cmdcode, unsigned char *aad, unsigned int aad_len, unsigned char *input_buffer, unsigned int input_len, unsigned char* shared_key, unsigned char *output_buffer, bool op=true){
 	if(input_len > MAX_SIZE || aad_len > MAX_SIZE) {cerr<<"Auth encrypt: Aad or plaintext too big";return -1;}
 	unsigned int opsize=0;
 	if(op) opsize=sizeof(short);
+	
 	if(input_len + aad_len > MAX_SIZE-AE_block_size-sizeof(unsigned int)-AE_iv_len-AE_tag_len-opsize) {cerr<<"Auth encrypt: Packet is too big";return -1;}
 	int ret;
 	unsigned char *iv = (unsigned char *)malloc(AE_iv_len);
 	if(!iv) {cerr<<"auth encrypt: iv Malloc Error";exit(1);}
 	RAND_poll();
 	ret = RAND_bytes((unsigned char*)&iv[0],AE_iv_len);
-	if(ret!=1){cerr<<"auth_encrypt:RAND_bytes Error";exit(1);}
+	if(ret!=1){cerr<<"encryptor:RAND_bytes Error";exit(1);}
 	EVP_CIPHER_CTX *ctx;
 	int len=0;
 	int ciphertext_len=0;
@@ -212,7 +213,7 @@ unsigned int auth_encrypt(short opcode, unsigned char *aad, unsigned int aad_len
 	if(!tag) {cerr<<"auth encrypt: tag Malloc Error";exit(1);}
 	unsigned char* complete_aad=(unsigned char*)malloc(sizeof(short)+aad_len);
 	if(!complete_aad) {cerr<<"auth encrypt: true_aad Malloc Error";exit(1);}
-	if(op)	memcpy(complete_aad,&opcode,opsize);
+	if(op)	memcpy(complete_aad,&cmdcode,opsize);
 	memcpy(complete_aad+opsize,aad,aad_len);
 	// Create and initialise the context
 	if(!(ctx = EVP_CIPHER_CTX_new()))
@@ -237,7 +238,7 @@ unsigned int auth_encrypt(short opcode, unsigned char *aad, unsigned int aad_len
 	handleErrors();
 	unsigned int output_len = AE_tag_len + ciphertext_len + AE_iv_len+ aad_len+ sizeof(unsigned int) + opsize;
 	unsigned int written=0;
-	if(op) memcpy(output_buffer,  (unsigned char *)&opcode, opsize);
+	if(op) memcpy(output_buffer,  (unsigned char *)&cmdcode, opsize);
 	written+=opsize;
 	memcpy(output_buffer + written, tag, AE_tag_len);
 	written+=AE_tag_len;
@@ -257,14 +258,14 @@ unsigned int auth_encrypt(short opcode, unsigned char *aad, unsigned int aad_len
 	return written;
 	}
 
-int auth_decrypt(unsigned char *input_buffer, unsigned int input_len, unsigned char* shared_key, short &opcode, unsigned char *output_aad, unsigned int &aad_len, unsigned char* output_buffer,bool op=true){
+int decryptor(unsigned char *input_buffer, unsigned int input_len, unsigned char* shared_key, short &cmdcode, unsigned char *output_aad, unsigned int &aad_len, unsigned char* output_buffer,bool op=true){
 	unsigned int opsize=0;
 	if(op)	opsize=sizeof(short);
 	if(input_len <= AE_iv_len+AE_tag_len+opsize) { cerr << "Error auth decrypt: malformed or empty message.\n"; return -1; }
 	if(input_len > MAX_SIZE) {cerr<<"Auth decrypt: Packet too big";return -1;}
 	EVP_CIPHER_CTX *ctx;
 	unsigned int read=0;
-	if(op)	opcode=*(short*)(input_buffer);
+	if(op)	cmdcode=*(short*)(input_buffer);
 	read+=opsize;
 	unsigned int output_len = 0;
 	unsigned char *iv = (unsigned char *)malloc(AE_iv_len);
@@ -283,7 +284,7 @@ int auth_decrypt(unsigned char *input_buffer, unsigned int input_len, unsigned c
 	read+=aad_len;
 	unsigned char* complete_aad=(unsigned char*)malloc(opsize+aad_len);
 	if(!complete_aad) {cerr<<"auth encrypt: true_aad Malloc Error";exit(1);}
-	if(op) memcpy(complete_aad, &opcode,opsize);
+	if(op) memcpy(complete_aad, &cmdcode,opsize);
 	memcpy(complete_aad+opsize,output_aad,aad_len);
 	unsigned int ciphertext_len = input_len - read;
 	if(ciphertext_len>MSG_MAX) {cerr<<"Auth decrypt: ciphertext too big";return -1;}

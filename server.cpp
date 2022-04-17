@@ -33,7 +33,7 @@ struct Packet{
 	char dest[USERNAME_SIZE];
 	unsigned char* msg;
 	unsigned int msgsize;
-	short opcode;
+	short cmdcode;
 };
 
 struct User{
@@ -55,32 +55,31 @@ struct Args{
 	
 };
 
-list<User> userlist;
+list<User> users;
 
 
 
-void send_userlist(int socket,  User* myuser, unsigned char* sessionkey){
+void send_userlist(int socket,  User* current_user, unsigned char* sessionkey){
 	int ret;
-	unsigned int message_size=0;
+	unsigned int msg_size=0;
 	unsigned char* message = (unsigned char*)malloc(MAX_CLIENTS*USERNAME_SIZE);
 	if(!message){cerr<<"send userlist: message Malloc Error";exit(1);}
-
-	for(list<User>::iterator it=userlist.begin(); it != userlist.end();it++){
-		if(strcmp(it->nickname,myuser->nickname) != 0 && it->online){
-			memcpy(message+message_size,it->nickname,strlen(it->nickname)+1);
-			message_size+=strlen(it->nickname)+1;
+	for(list<User>::iterator it=users.begin(); it != users.end();it++){
+		if(strcmp(it->nickname,current_user->nickname) != 0 && it->online){
+			memcpy(message+msg_size,it->nickname,strlen(it->nickname)+1);
+			msg_size+=strlen(it->nickname)+1;
 		}
 	}
 	
 	unsigned char* aad = (unsigned char*)malloc(sizeof(unsigned int));
 	if(!aad){cerr<<"send userlist: aad Malloc Error";exit(1);}
-	memcpy(aad,(unsigned char*)&myuser->send_counter,sizeof(unsigned int));
+	memcpy(aad,(unsigned char*)&current_user->send_counter,sizeof(unsigned int));
 	unsigned char* buffer = (unsigned char*)malloc(MAX_SIZE);
 	if(!buffer){cerr<<"send userlist: buffer Malloc Error";exit(1);}
-	ret=auth_encrypt(1,aad, sizeof(unsigned int), message, message_size , sessionkey, buffer);
+	ret=encryptor(1,aad, sizeof(unsigned int), message, msg_size , sessionkey, buffer);
 	if (ret>=0){
-		send_message(socket,ret,buffer);
-		increment_counter(myuser->send_counter);
+		send_msg(socket,ret,buffer);
+		increment_counter(current_user->send_counter);
 	}
 	free(buffer);
 	free(message);
@@ -92,7 +91,7 @@ void send_userlist(int socket,  User* myuser, unsigned char* sessionkey){
 void *outputqueue_handler(void* arguments){
 	Args *args = (Args*) arguments;
 	int socket= args->socket;
-	User* myuser= args->arguser;
+	User* current_user= args->arguser;
 	unsigned char* sessionkey=args->sessionkey;
 	int ret;
 	unsigned char* buffer = (unsigned char*)malloc(MAX_SIZE);
@@ -100,40 +99,40 @@ void *outputqueue_handler(void* arguments){
 	unsigned char* aad = (unsigned char*)malloc(MAX_SIZE);
 	if(!aad){cerr<<"outputqueue handler: aad Malloc Error";exit(1);}
 	pthread_mutex_lock(&mutex);
-	bool done=myuser->done;
+	bool done=current_user->done;
 	pthread_mutex_unlock(&mutex);
 	while(!done){
 		pthread_mutex_lock(&mutex);
-		if(!(myuser->outputqueue.empty())){
-			Packet message = myuser->outputqueue.front();
+		if(!(current_user->outputqueue.empty())){
+			Packet message = current_user->outputqueue.front();
 			
 			if(message.msgsize<=MSG_MAX){			
-				myuser->outputqueue.pop();
-				memcpy(aad,(unsigned char*)&myuser->send_counter,sizeof(unsigned int));
+				current_user->outputqueue.pop();
+				memcpy(aad,(unsigned char*)&current_user->send_counter,sizeof(unsigned int));
 				memcpy(aad+sizeof(unsigned int),message.msg,message.msgsize);
-				ret=auth_encrypt(message.opcode, aad, message.msgsize+sizeof(unsigned int), (unsigned char*)message.source,strlen(message.source)+1,sessionkey,buffer);
+				ret=encryptor(message.cmdcode, aad, message.msgsize+sizeof(unsigned int), (unsigned char*)message.source,strlen(message.source)+1,sessionkey,buffer);
 				if (ret>=0){
-					send_message(socket,ret,buffer);
-					increment_counter(myuser->send_counter);
+					send_msg(socket,ret,buffer);
+					increment_counter(current_user->send_counter);
 				}
-				if(message.opcode == 8){
-					myuser->online=true;
-					myuser->paired=false;
+				if(message.cmdcode == 8){
+					current_user->online=true;
+					current_user->paired=false;
 				}
-				else if(message.opcode == 4){
-					myuser->online=true;
+				else if(message.cmdcode == 4){
+					current_user->online=true;
 				}
-				else if (message.opcode == 2){
-					myuser->online=false;
+				else if (message.cmdcode == 2){
+					current_user->online=false;
 				}
 			}
 		}
-		done=myuser->done;
+		done=current_user->done;
 		pthread_mutex_unlock(&mutex);
 	}
 	free(buffer);
 	free(aad);
-	cout<<myuser->nickname<<": queue thread done."<<endl;	
+	cout<<current_user->nickname<<": queue thread done."<<endl;	
 	pthread_exit(NULL);
 	return NULL;
 }
@@ -143,7 +142,7 @@ void *outputqueue_handler(void* arguments){
 void *client_handler(void* arguments) {
 	Args *args = (Args*) arguments;
 	int socket= args->socket;
-	User* myuser= args->arguser;
+	User* current_user= args->arguser;
 	int ret;
 	uint32_t networknumber;
 	unsigned int clientnumber;
@@ -168,19 +167,19 @@ void *client_handler(void* arguments) {
 	fclose(file);
 	//receive signature
 
-	int message_size=receive_message(socket, buffer);
-	if(message_size==0) {cerr<<"establishSession: receive signed message error";exit(1);}
+	int msg_size=receive_message(socket, buffer);
+	if(msg_size==0) {cerr<<"establishSession: receive signed message error";exit(1);}
 
 	unsigned int sgnt_size=*(unsigned int*)buffer;
 	sgnt_size+=sizeof(unsigned int);
-	unsigned int username_size = message_size-sgnt_size- NONCE_SIZE;
+	unsigned int username_size = msg_size-sgnt_size- NONCE_SIZE;
 	if(username_size<=0){ cerr << "establishSession: no nickname \n"; exit(1); }
 	if(username_size>=USERNAME_SIZE){ cerr << "establishSession: nickname too long \n"; exit(1); }
 	char nickname[username_size+1];	
 	memcpy(nickname, buffer+sgnt_size+NONCE_SIZE, username_size);
 	nickname[username_size]='\0';
 	pthread_mutex_lock(&mutex);
-	strncpy(myuser->nickname, nickname, username_size+1);
+	strncpy(current_user->nickname, nickname, username_size+1);
 	pthread_mutex_unlock(&mutex);
 	string filename = "keys/"+(std::string)nickname+"_pub.pem";
 	cerr<<"client pub key filename: "<<filename<<endl;
@@ -195,8 +194,8 @@ void *client_handler(void* arguments) {
 	fclose(file3);
 	 
 	// verify signature and store received nonce
-	//ret=digsign_verify(client_pubkey,buffer, message_size,signature_buffer,signature_size);
-	ret=digsign_verify(client_pubkey,buffer, message_size, message);
+	//ret=digsign_verify(client_pubkey,buffer, msg_size,signature_buffer,signature_size);
+	ret=digsign_verify(client_pubkey,buffer, msg_size, message);
 	if(ret<0){cerr<<"establishSession: invalid signature!"; return NULL ;}
 	unsigned char* receivednonce=(unsigned char*)malloc(NONCE_SIZE);
 	memcpy(receivednonce, message, NONCE_SIZE);
@@ -235,14 +234,14 @@ void *client_handler(void* arguments) {
 	if(!PEM_write_bio_PUBKEY(kbio,   dhpvtkey)) { cerr<<"establishSession: PEM_write_bio_PUBKEY error";exit(1); }
 	long pubkeysize = BIO_get_mem_data(kbio, &buffered_ECDHpubkey);
 	if (pubkeysize<=0) { cerr<<"establishSession: BIO_get_mem_data error";exit(1); }
-	message_size= pubkeysize+NONCE_SIZE+NONCE_SIZE;
+	msg_size= pubkeysize+NONCE_SIZE+NONCE_SIZE;
 //Sign Message
 	memcpy(message,receivednonce,NONCE_SIZE);
 	memcpy(message+NONCE_SIZE,mynonce,NONCE_SIZE);
 	memcpy(message+NONCE_SIZE+NONCE_SIZE,buffered_ECDHpubkey,pubkeysize);
-	unsigned int signed_size=digsign_sign(server_key, message, message_size,buffer);
+	unsigned int signed_size=digsign_sign(server_key, message, msg_size,buffer);
 	free(receivednonce);
-	send_message(socket, signed_size, buffer);
+	send_msg(socket, signed_size, buffer);
 	BIO_free(bio);
 	BIO_free(kbio);
 	EVP_PKEY_free(server_key);
@@ -253,10 +252,10 @@ void *client_handler(void* arguments) {
 	if(memcmp(buffer+signature_size,mynonce,NONCE_SIZE)!=0){
 				cerr<<"establishSession: nonce received is not valid!\n";
 				return NULL;}
-	message_size= digsign_verify(client_pubkey,buffer,signed_size,message);
-	if(message_size<=0){cerr<<"establishSession: signed message error!\n"; return NULL;}
+	msg_size= digsign_verify(client_pubkey,buffer,signed_size,message);
+	if(msg_size<=0){cerr<<"establishSession: signed message error!\n"; return NULL;}
 	BIO* mbio= BIO_new(BIO_s_mem());	
-	BIO_write(mbio, message+NONCE_SIZE, message_size-NONCE_SIZE);
+	BIO_write(mbio, message+NONCE_SIZE, msg_size-NONCE_SIZE);
 	EVP_PKEY* ecdh_client_pubkey= PEM_read_bio_PUBKEY(mbio, NULL, NULL, NULL);
 	
 	size_t slen;
@@ -281,79 +280,79 @@ void *client_handler(void* arguments) {
 	ret=dh_generate_session_key(shared_secret, (unsigned int)slen, sessionkey);
 	free(shared_secret);	
 	args->sessionkey=sessionkey;
-	short opcode;
+	short cmdcode;
 	unsigned int aadlen;
 	unsigned int msglen;
-	myuser->online=true;
-	send_userlist(socket,myuser,sessionkey);
+	current_user->online=true;
+	send_userlist(socket,current_user,sessionkey);
 	pthread_t outputmanager;
 	if( pthread_create(&outputmanager, NULL, &outputqueue_handler, (void *)args)  != 0 )
 		printf("Failed to create thread\n");
 	pthread_mutex_lock(&mutex);	
-	bool done= myuser->done;
+	bool done= current_user->done;
 	pthread_mutex_unlock(&mutex);
 	while(!done){	
-		message_size=receive_message(socket,buffer);
+		msg_size=receive_message(socket,buffer);
 		pthread_mutex_lock(&mutex);
-		if(message_size>0&&!myuser->done){
+		if(msg_size>0&&!current_user->done){
 			unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 			
-			if(received_counter==myuser->recv_counter){
-				ret=auth_decrypt(buffer, message_size, sessionkey,opcode, aad, aadlen, message);
-				increment_counter(myuser->recv_counter);
+			if(received_counter==current_user->recv_counter){
+				ret=decryptor(buffer, msg_size, sessionkey,cmdcode, aad, aadlen, message);
+				increment_counter(current_user->recv_counter);
 				
 						
-				switch(opcode){
+				switch(cmdcode){
 					case 0://quit
 					{					
-						myuser->online=false;
-						cout<<myuser->nickname<<" has exited."<<endl;
-						myuser->done=true;						
+						current_user->online=false;
+						cout<<current_user->nickname<<" has exited."<<endl;
+						current_user->done=true;						
 					}break;
 					case 1:
 					{
-						send_userlist(socket,myuser,sessionkey);
+						send_userlist(socket,current_user,sessionkey);
 					}break;
 					case 2://rtt
 					{	
-						if(myuser->online&&ret>0&&ret<=USERNAME_SIZE){
+						if(current_user->online&&ret>0&&ret<=USERNAME_SIZE){
 							Packet rtt;		
 							bool found=false;
-							strncpy(rtt.source,myuser->nickname,USERNAME_SIZE);
+							strncpy(rtt.source,current_user->nickname,USERNAME_SIZE);
 							memcpy(rtt.dest,message,ret);
 							rtt.dest[ret]='\0';
 							rtt.msg=(unsigned char*) malloc(NONCE_SIZE);
 							if(!rtt.msg){cerr<<"msg malloc error"; exit(1);}
 							memcpy(rtt.msg,aad+sizeof(unsigned int),NONCE_SIZE);
 							rtt.msgsize=NONCE_SIZE;
-							for(list<User>::iterator it =userlist.begin(); it != userlist.end();it++){
+							for(list<User>::iterator it =users.begin(); it != users.end();it++){
 								if(strncmp(it->nickname,rtt.dest,strlen(rtt.dest))==0 && it->online){
 									found=true;
-									myuser->online=false;
-									rtt.opcode=opcode;
+									current_user->online=false;
+									rtt.cmdcode=cmdcode;
 									cout<<"forwarded rtt"<<endl;
 								}										
 							}
 							if(!found||strcmp(rtt.source,rtt.dest)==0){
-								strncpy(rtt.dest ,myuser->nickname,USERNAME_SIZE);
-								rtt.opcode = 7;	
-								myuser->online=true;
+								strncpy(rtt.dest ,current_user->nickname,USERNAME_SIZE);
+								rtt.cmdcode = 7;	
+								current_user->online=true;
 								cout<<"forwarded refuse , user not found"<<endl;								
 							}
-							myuser->inputqueue.push(rtt);
+							current_user->inputqueue.push(rtt);
 						}
 					}break;
 					case 3:
 					{	
 					cout<<"received accept "<<endl;
-						if(!myuser->paired){
+						if(!current_user->paired){
 							Packet key;
 							char peerusername[USERNAME_SIZE];	
  						
-							strncpy(key.source,myuser->nickname,USERNAME_SIZE);
+							strncpy(key.source,current_user->nickname,USERNAME_SIZE);
 							memcpy(key.dest,message,USERNAME_SIZE);
 							memcpy(peerusername,message,USERNAME_SIZE);	
-							memcpy(myuser->peer_nickname,message,USERNAME_SIZE);			
+							memcpy(current_user->peer_nickname,message,USERNAME_SIZE);			
 							BIO* mybio = BIO_new(BIO_s_mem());
 							PEM_write_bio_PUBKEY(mybio,client_pubkey);
 							char* mypubkey_buf=NULL;
@@ -364,10 +363,10 @@ void *client_handler(void* arguments) {
 							cout<<key.msgsize<<", signed part: "<<aadlen-sizeof(unsigned int)<<", key: "<<pubkey_size<<endl;   
 							memcpy(key.msg,(unsigned char*) &pubkey_size,sizeof(long));
 							memcpy(key.msg+sizeof(long),mypubkey_buf,pubkey_size);
-							// copio ecdhpubkey firmata da myuser nel messaggio per il peer
+							// copy ecdhpubkey signature from current_user of the peer
 							memcpy(key.msg+pubkey_size+sizeof(long),aad+sizeof(unsigned int),aadlen-sizeof(unsigned int));
 							BIO_free(mybio);					 
-							key.opcode=opcode;		
+							key.cmdcode=cmdcode;		
 							string fname = "keys/"+(string)peerusername+"_pub.pem";
 							//Get peer pubkey						
 							FILE* file2 = fopen( fname.c_str(), "r");
@@ -385,22 +384,22 @@ void *client_handler(void* arguments) {
 								unsigned int newaadlen=(unsigned int)pubkey_size+sizeof(unsigned int);
 								unsigned char* newaad=(unsigned char*) malloc(newaadlen);
 								if(!newaad){cerr<<"msg malloc error"; exit(1);}
-								memcpy(newaad,(unsigned char*) &myuser->send_counter,sizeof(unsigned int));
+								memcpy(newaad,(unsigned char*) &current_user->send_counter,sizeof(unsigned int));
 								memcpy(newaad+sizeof(unsigned int),thatpubkey_buf,(int)pubkey_size);
 								BIO_free(thatbio);
 								free(peer_pubkey);
-								message_size=auth_encrypt(6,newaad, newaadlen, message, ret , sessionkey, buffer); //send peer_pubkey 
+								msg_size=encryptor(6,newaad, newaadlen, message, ret , sessionkey, buffer); //send peer_pubkey 
 								free(newaad);
-								if (message_size>=0)
+								if (msg_size>=0)
 									{	
 										// send to peer the user pubkey and ecdhpubkey
-										myuser->inputqueue.push(key);
-										// send back to myuser the peerpubk key
-										send_message(socket,message_size,buffer);
+										current_user->inputqueue.push(key);
+										// send back to current_user the peerpubk key
+										send_msg(socket,msg_size,buffer);
 										cout<<"sent pubkey of: "<<peerusername<<endl;
-										increment_counter(myuser->send_counter);
-										myuser->paired=true;
-										myuser->online=false;
+										increment_counter(current_user->send_counter);
+										current_user->paired=true;
+										current_user->online=false;
 									}
 							}fclose(file2);
 						}
@@ -409,70 +408,70 @@ void *client_handler(void* arguments) {
 					case 4:
 					{	
 						cout<<"received refuse "<<endl;
-						if(!myuser->paired){
+						if(!current_user->paired){
 							Packet refusal;					
-							strncpy(refusal.source,myuser->nickname,USERNAME_SIZE);
+							strncpy(refusal.source,current_user->nickname,USERNAME_SIZE);
 							memcpy(refusal.dest,message,USERNAME_SIZE);
 							refusal.msgsize=0;
-							refusal.opcode=opcode;
-							myuser->online=true;
-							myuser->inputqueue.push(refusal);
+							refusal.cmdcode=cmdcode;
+							current_user->online=true;
+							current_user->inputqueue.push(refusal);
 							cout<<"forwarded refuse "<<endl;
 						}
 					}break;
 					case 5:
 					{	
-						if(myuser->paired){
+						if(current_user->paired){
 							Packet mex;					
-							strncpy(mex.source,myuser->nickname,USERNAME_SIZE);
+							strncpy(mex.source,current_user->nickname,USERNAME_SIZE);
 							memcpy(mex.dest,message,USERNAME_SIZE);
 							mex.msgsize=aadlen-sizeof(unsigned int);
 							mex.msg=(unsigned char*) malloc(mex.msgsize);
 							if(!mex.msg){cerr<<"msg malloc error"; exit(1);}
 							memcpy(mex.msg,aad+sizeof(unsigned int),mex.msgsize);
-							mex.opcode=opcode;
-							myuser->inputqueue.push(mex);
+							mex.cmdcode=cmdcode;
+							current_user->inputqueue.push(mex);
 						}
 					}break;
 					case 6:
 					{
 								
-								myuser->paired=true;								
+								current_user->paired=true;								
 								Packet mex;					
-								strncpy(mex.source,myuser->nickname,USERNAME_SIZE);
-								memcpy(myuser->peer_nickname,message,USERNAME_SIZE);
+								strncpy(mex.source,current_user->nickname,USERNAME_SIZE);
+								memcpy(current_user->peer_nickname,message,USERNAME_SIZE);
 								memcpy(mex.dest,message,USERNAME_SIZE);
 								mex.msgsize=aadlen-sizeof(unsigned int);
 								mex.msg=(unsigned char*) malloc(mex.msgsize);
 								if(!mex.msg){cerr<<"msg malloc error"; exit(1);}
 								memcpy(mex.msg,aad+sizeof(unsigned int), mex.msgsize);
-								mex.opcode=6;
-								myuser->inputqueue.push(mex);								
+								mex.cmdcode=6;
+								current_user->inputqueue.push(mex);								
 		
 					}break;
 					case 8:
 					{
-						if(myuser->paired){
+						if(current_user->paired){
 							Packet end;					
-							strncpy(end.source,myuser->nickname,USERNAME_SIZE);
-							strncpy(end.dest,myuser->peer_nickname,USERNAME_SIZE);
+							strncpy(end.source,current_user->nickname,USERNAME_SIZE);
+							strncpy(end.dest,current_user->peer_nickname,USERNAME_SIZE);
 							end.msgsize=0;
-							end.opcode=opcode;
-							myuser->inputqueue.push(end);
-							message_size=auth_encrypt(8,(unsigned char*)&myuser->send_counter, sizeof(unsigned int), (unsigned char*)myuser->nickname, strlen(myuser->nickname) , sessionkey, buffer);
-							if (message_size>=0)
+							end.cmdcode=cmdcode;
+							current_user->inputqueue.push(end);
+							msg_size=encryptor(8,(unsigned char*)&current_user->send_counter, sizeof(unsigned int), (unsigned char*)current_user->nickname, strlen(current_user->nickname) , sessionkey, buffer);
+							if (msg_size>=0)
 								{	
-									send_message(socket,message_size,buffer);
-									increment_counter(myuser->send_counter);
+									send_msg(socket,msg_size,buffer);
+									increment_counter(current_user->send_counter);
 								}
-							myuser->paired=false;
-							myuser->online=true;
+							current_user->paired=false;
+							current_user->online=true;
 						}
 					}break;
 				}
 			}
 		}
-		done=myuser->done;
+		done=current_user->done;
 		pthread_mutex_unlock(&mutex);
 	}
 	pthread_join(outputmanager,NULL);
@@ -481,7 +480,7 @@ void *client_handler(void* arguments) {
 	free(aad);
 	free(message);
 	close(socket);
-	cout<<myuser->nickname<<": thread done."<<endl;	
+	cout<<current_user->nickname<<": thread done."<<endl;	
 	pthread_exit(NULL);
 	return NULL;
 }
@@ -519,7 +518,7 @@ int main(int argc, char *argv[]){
     while(1)
     {
         //Accept call creates a new socket and thread for the incoming connection
-	if(userlist.size()<MAX_CLIENTS){
+	if(users.size()<MAX_CLIENTS){
 		int newsocksocket = accept(socksocket, (struct sockaddr *) &cli_addr, &clilen);
 		if (newsocksocket < 0){ 
 			if (errno != EAGAIN || errno != EWOULDBLOCK)	error("ERROR on accept");
@@ -527,14 +526,14 @@ int main(int argc, char *argv[]){
 		else{	
 			pthread_mutex_lock(&list_mutex);
 			User u;
-			userlist.push_back(u);
+			users.push_back(u);
 			Args *args=(Args *)malloc(sizeof(struct Args));
 
 			args->socket=newsocksocket;
-			args->arguser=&userlist.back();
+			args->arguser=&users.back();
 			pthread_t thread;
 			threadlist.push_back(thread);
-			if( pthread_create(&threadlist.back(), NULL, &client_handler, (void *)args)  != 0 )
+			if(pthread_create(&threadlist.back(), NULL, &client_handler, (void *)args)  != 0 )
 			printf("Failed to create thread\n");
 			pthread_mutex_unlock(&list_mutex);
 		}
@@ -542,16 +541,16 @@ int main(int argc, char *argv[]){
 
 	int i=0;
 	pthread_mutex_lock(&list_mutex);	
-	for(list<User>::iterator it=userlist.begin(); it != userlist.end();it++){
+	for(list<User>::iterator it=users.begin(); it != users.end();it++){
 		//Check for messages in input queues and move them to dest outputqueue.
 		pthread_mutex_lock(&mutex);				
 		while(!(it->inputqueue.empty())){	
 			Packet message = it->inputqueue.front();
 			it->inputqueue.pop();
 			
-			for(list<User>::iterator it2=userlist.begin(); it2 != userlist.end();it2++){
+			for(list<User>::iterator it2=users.begin(); it2 != users.end();it2++){
 				if(strcmp(message.dest, it2->nickname) == 0){
-					cout<<message.source<<"-->"<<message.dest<<" "<<message.opcode<<endl;
+					cout<<message.source<<"-->"<<message.dest<<" "<<message.cmdcode<<endl;
 					it2->outputqueue.push(message);
 				}
 			}
@@ -563,11 +562,11 @@ int main(int argc, char *argv[]){
 			advance(t,i);
 			pthread_join(*t,NULL);
 			cout<<it->nickname<<": deleting."<<endl;
-			it=userlist.erase(it);
+			it=users.erase(it);
 			i++;
-			if(it==userlist.end())
+			if(it==users.end())
 			{
-				it=userlist.begin();
+				it=users.begin();
 				i=0;
 			}
 			
