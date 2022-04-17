@@ -14,7 +14,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/err.h>
-#include "config.h"
+#include "common.h"
 #include <arpa/inet.h>
 #include<pthread.h>
 
@@ -164,7 +164,7 @@ void *client_handler(void* arguments) {
 	FILE* file = fopen("serverFiles/s_key.pem", "r");
 	if(!file) {cerr<<"establishSession: s_k File Open Error\n";exit(1);}   
 	server_key= PEM_read_PrivateKey(file, NULL, NULL, NULL);
-	if(!server_key) {cerr<<"establishSession: server_key Error";exit(1);}
+	if(!server_key) {cerr<<"establishSession: server_key Error\n";exit(1);}
 	fclose(file);
 	//receive signature
 
@@ -183,7 +183,7 @@ void *client_handler(void* arguments) {
 	strncpy(myuser->nickname, nickname, username_size+1);
 	pthread_mutex_unlock(&mutex);
 	string filename = "keys/"+(std::string)nickname+"_pub.pem";
-
+	cerr<<"client pub key filename: "<<filename<<endl;
 	//Get user pubkey
 	EVP_PKEY* client_pubkey;
 	FILE* file3 = fopen( filename.c_str(), "r");
@@ -212,7 +212,7 @@ void *client_handler(void* arguments) {
 	uint32_t size;
 	X509* serverCert;
 	FILE* certfile = fopen("serverFiles/s_cert.pem", "r");
-	if(!certfile) { cerr<<"establishSession:s_c  File Open Error\n";exit(1);}
+	if(!certfile) { cerr<<"establishSession:cert File Open Error\n";exit(1);}
 	serverCert = PEM_read_X509(certfile, NULL, NULL, NULL);
 	if(!serverCert) { cerr<<"establishSession: PEM_read_X509 error\n";exit(1); }
 	fclose(certfile);
@@ -372,7 +372,7 @@ void *client_handler(void* arguments) {
 							//Get peer pubkey						
 							FILE* file2 = fopen( fname.c_str(), "r");
 							if(!file2) {
-								cerr<<"Accept: Incorrect peer Username";
+								cerr<<"Accept: Incorrect peer Username\n";
 								
 							}   
 							else{ 

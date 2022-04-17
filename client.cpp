@@ -17,7 +17,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509_vfy.h>
 #include <openssl/err.h>
-#include "config.h"
+#include "common.h"
 
 pthread_mutex_t mutex;
 pthread_mutex_t dhmutex;
@@ -263,10 +263,12 @@ void *recv_handler(void* arguments){
 								if(*waiting&&memcmp(nonce,aad+sizeof(long)+pubkey_size+256+2*(sizeof(unsigned int)),NONCE_SIZE)==0&&memcmp(message, peer_username,ret-1)==0){
 									message_size=ret;
 									ret=establishSessionAccepted(user_key, client_sessionkey, aad, aadlen);
+									cout <<"key accepted: "<<ret <<endl;
 									if(ret>=0){
 										memcpy(buffer,(unsigned char*)srv_send_counter,sizeof(unsigned int));
 										memcpy(buffer+sizeof(unsigned int),aad,aadlen);
 										ret=auth_encrypt(6, buffer, aadlen+sizeof(unsigned int),(unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, aad);
+										cout <<"encryption: "<<ret <<endl;
 										if(ret>=0){
 											send_message(socket, ret, aad);
 											increment_counter(*srv_send_counter);
@@ -547,6 +549,7 @@ int main(int argc, char *argv[]){
 					memcpy(aad, (unsigned char*) &srv_counter,  sizeof(unsigned int));
 					memcpy(aad+sizeof(unsigned int), message, message_size);
 					ret=auth_encrypt(3, aad, message_size+sizeof(unsigned int),  (unsigned char*)peer_username, strlen(peer_username)+1, server_sessionkey, buffer);
+					cout << "result of accept encrypt: " << ret << endl;
 					send_message(sockfd,ret,buffer);
 					increment_counter(srv_counter);
 					
@@ -561,16 +564,20 @@ int main(int argc, char *argv[]){
 								BIO* pkbio= BIO_new(BIO_s_mem());
 								BIO_write(pkbio, aad+sizeof(unsigned int), pubkey_size);
 								peer_key= PEM_read_bio_PUBKEY(pkbio, NULL, NULL, NULL);
+								cout <<"peer key: " << peer_key<<endl;
 								BIO_free(pkbio);
 							}
 						}
 					}
 					//aspetta altro messaggio 6 con ecdhpubkey
+					cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
 					message_size=receive_message(sockfd,buffer);
+					cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
 					if(message_size>0){
 						unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 						if(received_counter==srv_rcv_counter){
 							ret= auth_decrypt(buffer, message_size, server_sessionkey,opcode, aad, aadlen, message);
+							cout << " decrypt 2 msg : " << ret << buffer << endl;
 							if(ret>=0&&opcode==6){
 								increment_counter(srv_rcv_counter);							
 								unsigned int s_size=*(unsigned int*)(aad+sizeof(unsigned int));			 
@@ -582,7 +589,7 @@ int main(int argc, char *argv[]){
 								free(mynonce2);
 								
 								message_size= digsign_verify(peer_key,aad+sizeof(unsigned int),aadlen-sizeof(unsigned int),buffer);
-								if(message_size<=0){cerr<<"signature is invalid"; exit(1);}
+								if(message_size<=0){cerr<<"signature is invalid"; exit(1);}else{cout << "signature vaild"<<endl;}
 								free(peer_key);
 								//extract ecdh_peer_pubkey
 								BIO* mbio2= BIO_new(BIO_s_mem());	
