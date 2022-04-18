@@ -25,7 +25,7 @@ g++ -o client client.cpp -pthread -lcrypto
 ```
 the [PORT] should be the port of the server
 
-### cmdcodes:
+## cmdcodes:
 These codes that help to identify the messages structure and process it accordingly.
 cmdcode |  Meaning 
 ---  |  ---
