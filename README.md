@@ -38,3 +38,8 @@ cmdcode |  Meaning
 6 | send ECDH_PUB_KEY and PUB_KEY to user who accepted the chat request
 7 | bad request to unknown or unavalible user
 8 | the peer exits the chat
+
+
+## Authors
+- **[Mohammed Mohammed](https://github.com/mohammedmrm)**
+- **[Noushin Najafiragheb](https://github.com/nooshinnr)**
