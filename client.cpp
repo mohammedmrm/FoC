@@ -227,15 +227,15 @@ void *recv_handler(void* arguments){
 		pthread_mutex_lock(&dhmutex);
 		while(*pending) { pthread_cond_wait (&cond, &dhmutex);}
 		pthread_mutex_unlock(&dhmutex);	
-		message_size=receive_message(socket,buffer);
+		message_size=receive_msg(socket,buffer);
 		pthread_mutex_lock(&mutex);	
 		if(message_size>0){
 			unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 			if(received_counter==*srv_recv_counter){
 				 
-				//////NOI
+				
 				memset(message, 0, message_size);
-				////////////
+				
 				ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
 	
 				if(ret>=0){
@@ -352,7 +352,7 @@ int main(int argc, char *argv[]){
 	 
 	char username[USERNAME_SIZE];
 	sprintf(username,"%s",argv[3]);
-	string filename = "keys/"+string(username)+"_pri.pem";
+	string filename = "clientFiles/"+string(username)+"_pri.pem";
 	portno = atoi(argv[2]);
 	
 	EVP_PKEY* user_key;
@@ -408,7 +408,7 @@ int main(int argc, char *argv[]){
 	}
 	EVP_PKEY* server_pubkey= verify_server_certificate( certbuffer, certsize );
 	//receive signedmessage
-	signed_size=receive_message(sockfd, buffer);
+	signed_size=receive_msg(sockfd, buffer);
 	if(signed_size<=0){cerr<<"receive message: error"; exit(1);}
 	unsigned int signature_size=*(unsigned int*)buffer;
 	signature_size+=sizeof(unsigned int);
@@ -472,7 +472,7 @@ int main(int argc, char *argv[]){
 	short cmdcode;
 	unsigned int aadlen;
 	unsigned int msglen;
-	message_size=receive_message(sockfd,buffer);
+	message_size=receive_msg(sockfd,buffer);
 	unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 	if(received_counter==srv_rcv_counter){
 		ret= decryptor(buffer, message_size, server_sessionkey,cmdcode, aad, aadlen, message);
@@ -552,7 +552,7 @@ int main(int argc, char *argv[]){
 					send_msg(sockfd,ret,buffer);
 					increment_counter(srv_counter);
 					
-					message_size=receive_message(sockfd,buffer);	
+					message_size=receive_msg(sockfd,buffer);	
 					if(message_size>0){
 						unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
 						if(received_counter==srv_rcv_counter){
@@ -570,7 +570,7 @@ int main(int argc, char *argv[]){
 					}
 					
 					//cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
-					message_size=receive_message(sockfd,buffer);
+					message_size=receive_msg(sockfd,buffer);
 					//cout << " ecdhpubkey msg : " << message_size << ":::" << srv_rcv_counter <<":::"<< buffer << endl;
 					if(message_size>0){
 						unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);

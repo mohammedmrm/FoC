@@ -167,7 +167,7 @@ void *client_handler(void* arguments) {
 	fclose(file);
 	//receive signature
 
-	int msg_size=receive_message(socket, buffer);
+	int msg_size=receive_msg(socket, buffer);
 	if(msg_size==0) {cerr<<"establishSession: receive signed message error";exit(1);}
 
 	unsigned int sgnt_size=*(unsigned int*)buffer;
@@ -181,7 +181,7 @@ void *client_handler(void* arguments) {
 	pthread_mutex_lock(&mutex);
 	strncpy(current_user->nickname, nickname, username_size+1);
 	pthread_mutex_unlock(&mutex);
-	string filename = "keys/"+(std::string)nickname+"_pub.pem";
+	string filename = "serverFiles/"+(std::string)nickname+"_pub.pem";
 	cerr<<"client pub key filename: "<<filename<<endl;
 	//Get user pubkey
 	EVP_PKEY* client_pubkey;
@@ -246,7 +246,7 @@ void *client_handler(void* arguments) {
 	BIO_free(kbio);
 	EVP_PKEY_free(server_key);
 	//Get ecdhpubkey from client
-	signed_size=receive_message(socket, buffer);
+	signed_size=receive_msg(socket, buffer);
 	unsigned int signature_size=*(unsigned int*)buffer;
 	signature_size+=sizeof(unsigned int);
 	if(memcmp(buffer+signature_size,mynonce,NONCE_SIZE)!=0){
@@ -292,7 +292,7 @@ void *client_handler(void* arguments) {
 	bool done= current_user->done;
 	pthread_mutex_unlock(&mutex);
 	while(!done){	
-		msg_size=receive_message(socket,buffer);
+		msg_size=receive_msg(socket,buffer);
 		pthread_mutex_lock(&mutex);
 		if(msg_size>0&&!current_user->done){
 			unsigned int received_counter=*(unsigned int*)(buffer+MSGHEADER);
@@ -363,11 +363,11 @@ void *client_handler(void* arguments) {
 							cout<<key.msgsize<<", signed part: "<<aadlen-sizeof(unsigned int)<<", key: "<<pubkey_size<<endl;   
 							memcpy(key.msg,(unsigned char*) &pubkey_size,sizeof(long));
 							memcpy(key.msg+sizeof(long),mypubkey_buf,pubkey_size);
-							// copy ecdhpubkey signature from current_user of the peer
+							// copy ecdhpubkey signature from current_user to the peer
 							memcpy(key.msg+pubkey_size+sizeof(long),aad+sizeof(unsigned int),aadlen-sizeof(unsigned int));
 							BIO_free(mybio);					 
 							key.cmdcode=cmdcode;		
-							string fname = "keys/"+(string)peerusername+"_pub.pem";
+							string fname = "serverFiles/"+(string)peerusername+"_pub.pem";
 							//Get peer pubkey						
 							FILE* file2 = fopen( fname.c_str(), "r");
 							if(!file2) {

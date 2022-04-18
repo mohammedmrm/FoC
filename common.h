@@ -49,7 +49,7 @@ void send_msg(int socket, unsigned int msg_size, unsigned char* message){
 
 }
 
-unsigned int receive_message(int socket, unsigned char* message){
+unsigned int receive_msg(int socket, unsigned char* message){
 	int ret;
 	uint32_t networknumber;
 
