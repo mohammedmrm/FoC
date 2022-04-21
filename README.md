@@ -2,10 +2,10 @@
 This is a secure Client-Server-Client message application.
 - the server trusted by using CA's cert and authenticate the server's cert
 - all message are signed and encrypted.
-- the server can handle Muli clients using threads.
-- The client will also have thread for reciving incoming messages and main thread to send messages.
+- the server can handle Multi clients using threads.
+- The client will also have thread for receiving incoming messages and main thread to send messages.
 
-# Compile 
+## Compile 
 To run this project:
 
 - Open a terminal and run the server.cpp.
